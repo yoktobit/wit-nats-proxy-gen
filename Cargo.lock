@@ -118,6 +118,7 @@ dependencies = [
  "serde",
  "serde_json",
  "wit-bindgen",
+ "wit_nats_proxy_macros",
 ]
 
 [[package]]
@@ -314,6 +315,16 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser",
+]
+
+[[package]]
+name = "wit_nats_proxy_macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+ "wit-parser",
 ]
 
 [[package]]
