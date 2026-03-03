@@ -10,6 +10,16 @@ generate_wit_nats_proxy_from_wit!(...)
 
 This macro reads your WIT definitions, resolves function signatures, and expands to the runtime `generate_wit_nats_proxy!` macro.
 
+## Required dependencies
+
+Your crate should depend on both crates:
+
+```toml
+[dependencies]
+wit_nats_proxy = { path = "../../crates/wit_nats_proxy" }
+wit_nats_proxy_macros = { path = "../../crates/wit_nats_proxy_macros" }
+```
+
 ## What it generates
 
 - A `serde`-enabled bindings module (default: `serde_world_bindings`)
@@ -21,6 +31,7 @@ This macro reads your WIT definitions, resolves function signatures, and expands
 ```rust
 generate_wit_nats_proxy_from_wit!(
     world: "acme-world-serde",
+    wit_path: "../../wit/world.wit",
 );
 ```
 
@@ -100,8 +111,6 @@ Each routed WIT function must have exactly one parameter.
 ## Minimal end-to-end example
 
 ```rust
-mod wit_nats_proxy;
-
 use wit_nats_proxy_macros::generate_wit_nats_proxy_from_wit;
 
 generate_wit_nats_proxy_from_wit!(
