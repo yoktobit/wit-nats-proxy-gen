@@ -1,8 +1,7 @@
 #[macro_export]
 macro_rules! generate_wit_nats_proxy {
     (
-        serde_world: $serde_world:literal,
-        no_serde_world: $no_serde_world:literal,
+        world: $world:literal,
         routes: [
             $(
                 $proxy_fn:ident => {
@@ -10,6 +9,7 @@ macro_rules! generate_wit_nats_proxy {
                     input: $($input_ty:ident)::+,
                     output: $output_ty:ty
                     $(, timeout_ms: $timeout_ms:expr)?
+                    $(, subject: $subject:expr)?
                     $(,)?
                 }
             ),+ $(,)?
@@ -18,9 +18,7 @@ macro_rules! generate_wit_nats_proxy {
     ) => {
         generate_wit_nats_proxy!(
             serde_mod: serde_world_bindings,
-            serde_world: $serde_world,
-            no_serde_mod: no_serde_world_bindings,
-            no_serde_world: $no_serde_world,
+            world: $world,
             global_prefix: "default",
             routes: [
                 $(
@@ -29,6 +27,7 @@ macro_rules! generate_wit_nats_proxy {
                         input: $($input_ty)::+,
                         output: $output_ty
                         $(, timeout_ms: $timeout_ms)?
+                        $(, subject: $subject)?
                     }
                 ),+
             ],
@@ -36,8 +35,7 @@ macro_rules! generate_wit_nats_proxy {
     };
 
     (
-        serde_world: $serde_world:literal,
-        no_serde_world: $no_serde_world:literal,
+        world: $world:literal,
         global_prefix: $global_prefix:literal,
         routes: [
             $(
@@ -46,6 +44,7 @@ macro_rules! generate_wit_nats_proxy {
                     input: $($input_ty:ident)::+,
                     output: $output_ty:ty
                     $(, timeout_ms: $timeout_ms:expr)?
+                    $(, subject: $subject:expr)?
                     $(,)?
                 }
             ),+ $(,)?
@@ -54,9 +53,7 @@ macro_rules! generate_wit_nats_proxy {
     ) => {
         generate_wit_nats_proxy!(
             serde_mod: serde_world_bindings,
-            serde_world: $serde_world,
-            no_serde_mod: no_serde_world_bindings,
-            no_serde_world: $no_serde_world,
+            world: $world,
             global_prefix: $global_prefix,
             routes: [
                 $(
@@ -65,6 +62,7 @@ macro_rules! generate_wit_nats_proxy {
                         input: $($input_ty)::+,
                         output: $output_ty
                         $(, timeout_ms: $timeout_ms)?
+                        $(, subject: $subject)?
                     }
                 ),+
             ],
@@ -73,9 +71,7 @@ macro_rules! generate_wit_nats_proxy {
 
     (
         serde_mod: $serde_mod:ident,
-        serde_world: $serde_world:literal,
-        no_serde_mod: $no_serde_mod:ident,
-        no_serde_world: $no_serde_world:literal,
+        world: $world:literal,
         routes: [
             $(
                 $proxy_fn:ident => {
@@ -83,6 +79,7 @@ macro_rules! generate_wit_nats_proxy {
                     input: $($input_ty:ident)::+,
                     output: $output_ty:ty
                     $(, timeout_ms: $timeout_ms:expr)?
+                    $(, subject: $subject:expr)?
                     $(,)?
                 }
             ),+ $(,)?
@@ -91,9 +88,7 @@ macro_rules! generate_wit_nats_proxy {
     ) => {
         generate_wit_nats_proxy!(
             serde_mod: $serde_mod,
-            serde_world: $serde_world,
-            no_serde_mod: $no_serde_mod,
-            no_serde_world: $no_serde_world,
+            world: $world,
             global_prefix: "default",
             routes: [
                 $(
@@ -102,6 +97,7 @@ macro_rules! generate_wit_nats_proxy {
                         input: $($input_ty)::+,
                         output: $output_ty
                         $(, timeout_ms: $timeout_ms)?
+                        $(, subject: $subject)?
                     }
                 ),+
             ],
@@ -110,9 +106,7 @@ macro_rules! generate_wit_nats_proxy {
 
     (
         serde_mod: $serde_mod:ident,
-        serde_world: $serde_world:literal,
-        no_serde_mod: $no_serde_mod:ident,
-        no_serde_world: $no_serde_world:literal,
+        world: $world:literal,
         global_prefix: $global_prefix:literal,
         routes: [
             $(
@@ -121,6 +115,7 @@ macro_rules! generate_wit_nats_proxy {
                     input: $($input_ty:ident)::+,
                     output: $output_ty:ty
                     $(, timeout_ms: $timeout_ms:expr)?
+                    $(, subject: $subject:expr)?
                     $(,)?
                 }
             ),+ $(,)?
@@ -138,14 +133,20 @@ macro_rules! generate_wit_nats_proxy {
 
         mod $serde_mod {
             wit_bindgen::generate!({
-                world: $serde_world,
+                world: $world,
                 additional_derives: [serde::Serialize, serde::Deserialize],
             });
         }
 
-        mod $no_serde_mod {
+        mod __wit_nats_proxy_bindings {
             wit_bindgen::generate!({
-                world: $no_serde_world,
+                inline: r#"
+                    package wit:nats-proxy@0.0.1;
+
+                    world nats-request-world {
+                        import wasmcloud:messaging/consumer@0.2.0;
+                    }
+                "#,
                 generate_all,
             });
         }
@@ -160,7 +161,7 @@ macro_rules! generate_wit_nats_proxy {
             R: serde::de::DeserializeOwned,
         {
             let body = serde_json::to_vec(&input).map_err(|e| e.to_string())?;
-            let res = crate::$no_serde_mod::wasmcloud::messaging::consumer::request(
+            let res = crate::__wit_nats_proxy_bindings::wasmcloud::messaging::consumer::request(
                 subject,
                 &body,
                 timeout_ms,
@@ -184,9 +185,11 @@ macro_rules! generate_wit_nats_proxy {
                     crate::$serde_mod::$($wit_fn)::+;
 
                 let _ = _wit_signature_check;
+                let subject = concat!("rpc.", $global_prefix, ".", stringify!($proxy_fn));
+                $(let subject = $subject;)?
 
                 __nats_request::<crate::$serde_mod::$($input_ty)::+, $output_ty>(
-                    concat!("rpc.", $global_prefix, ".", stringify!($proxy_fn)),
+                    subject,
                     __route_timeout_ms!($($timeout_ms)?),
                     &input,
                 )

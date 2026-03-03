@@ -11,6 +11,13 @@ struct RouteSpec {
     proxy_fn: Ident,
     wit_fn: Path,
     timeout_ms: Option<Expr>,
+    subject: Option<LitStr>,
+}
+
+struct RouteOverrideSpec {
+    proxy_fn: Ident,
+    timeout_ms: Option<Expr>,
+    subject: Option<LitStr>,
 }
 
 impl Parse for RouteSpec {
@@ -23,6 +30,7 @@ impl Parse for RouteSpec {
 
         let mut wit_fn: Option<Path> = None;
         let mut timeout_ms: Option<Expr> = None;
+        let mut subject: Option<LitStr> = None;
 
         while !content.is_empty() {
             let key: Ident = content.parse()?;
@@ -30,6 +38,7 @@ impl Parse for RouteSpec {
             match key.to_string().as_str() {
                 "wit_fn" => wit_fn = Some(content.parse()?),
                 "timeout_ms" => timeout_ms = Some(content.parse()?),
+                "subject" => subject = Some(content.parse()?),
                 _ => return Err(syn::Error::new(key.span(), "unknown route field")),
             }
 
@@ -44,29 +53,61 @@ impl Parse for RouteSpec {
             proxy_fn,
             wit_fn: wit_fn.ok_or_else(|| syn::Error::new(proxy_span, "missing wit_fn"))?,
             timeout_ms,
+            subject,
+        })
+    }
+}
+
+impl Parse for RouteOverrideSpec {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let proxy_fn: Ident = input.parse()?;
+        input.parse::<Token![=>]>()?;
+
+        let content;
+        braced!(content in input);
+
+        let mut timeout_ms: Option<Expr> = None;
+        let mut subject: Option<LitStr> = None;
+
+        while !content.is_empty() {
+            let key: Ident = content.parse()?;
+            content.parse::<Token![:]>()?;
+            match key.to_string().as_str() {
+                "timeout_ms" => timeout_ms = Some(content.parse()?),
+                "subject" => subject = Some(content.parse()?),
+                _ => return Err(syn::Error::new(key.span(), "unknown route override field")),
+            }
+
+            if content.peek(Token![,]) {
+                content.parse::<Token![,]>()?;
+            }
+        }
+
+        Ok(Self {
+            proxy_fn,
+            timeout_ms,
+            subject,
         })
     }
 }
 
 struct ProxyConfig {
     serde_mod: Option<Ident>,
-    serde_world: LitStr,
-    no_serde_mod: Option<Ident>,
-    no_serde_world: LitStr,
+    world: LitStr,
     global_prefix: Option<LitStr>,
     wit_path: Option<LitStr>,
-    routes: Vec<RouteSpec>,
+    routes: Option<Vec<RouteSpec>>,
+    route_overrides: Option<Vec<RouteOverrideSpec>>,
 }
 
 impl Parse for ProxyConfig {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let mut serde_mod: Option<Ident> = None;
-        let mut serde_world: Option<LitStr> = None;
-        let mut no_serde_mod: Option<Ident> = None;
-        let mut no_serde_world: Option<LitStr> = None;
+        let mut world: Option<LitStr> = None;
         let mut global_prefix: Option<LitStr> = None;
         let mut wit_path: Option<LitStr> = None;
         let mut routes: Option<Vec<RouteSpec>> = None;
+        let mut route_overrides: Option<Vec<RouteOverrideSpec>> = None;
 
         while !input.is_empty() {
             let key: Ident = input.parse()?;
@@ -74,9 +115,7 @@ impl Parse for ProxyConfig {
 
             match key.to_string().as_str() {
                 "serde_mod" => serde_mod = Some(input.parse()?),
-                "serde_world" => serde_world = Some(input.parse()?),
-                "no_serde_mod" => no_serde_mod = Some(input.parse()?),
-                "no_serde_world" => no_serde_world = Some(input.parse()?),
+                "world" => world = Some(input.parse()?),
                 "global_prefix" => global_prefix = Some(input.parse()?),
                 "wit_path" => wit_path = Some(input.parse()?),
                 "routes" => {
@@ -91,6 +130,18 @@ impl Parse for ProxyConfig {
                     }
                     routes = Some(parsed);
                 }
+                "route_overrides" => {
+                    let content;
+                    bracketed!(content in input);
+                    let mut parsed = Vec::new();
+                    while !content.is_empty() {
+                        parsed.push(content.parse()?);
+                        if content.peek(Token![,]) {
+                            content.parse::<Token![,]>()?;
+                        }
+                    }
+                    route_overrides = Some(parsed);
+                }
                 _ => return Err(syn::Error::new(key.span(), "unknown config field")),
             }
 
@@ -101,13 +152,11 @@ impl Parse for ProxyConfig {
 
         Ok(Self {
             serde_mod,
-            serde_world: serde_world.ok_or_else(|| syn::Error::new(Span::call_site(), "missing serde_world"))?,
-            no_serde_mod,
-            no_serde_world: no_serde_world
-                .ok_or_else(|| syn::Error::new(Span::call_site(), "missing no_serde_world"))?,
+            world: world.ok_or_else(|| syn::Error::new(Span::call_site(), "missing world"))?,
             global_prefix,
             wit_path,
-            routes: routes.ok_or_else(|| syn::Error::new(Span::call_site(), "missing routes"))?,
+            routes,
+            route_overrides,
         })
     }
 }
@@ -123,15 +172,11 @@ pub fn generate_wit_nats_proxy_from_wit(input: TokenStream) -> TokenStream {
 }
 
 fn expand(cfg: ProxyConfig) -> Result<TokenStream2> {
-    let serde_world = cfg.serde_world;
-    let no_serde_world = cfg.no_serde_world;
+    let world = cfg.world;
 
     let serde_mod = cfg
         .serde_mod
         .unwrap_or_else(|| Ident::new("serde_world_bindings", Span::call_site()));
-    let no_serde_mod = cfg
-        .no_serde_mod
-        .unwrap_or_else(|| Ident::new("no_serde_world_bindings", Span::call_site()));
     let global_prefix = cfg
         .global_prefix
         .unwrap_or_else(|| LitStr::new("default", Span::call_site()));
@@ -161,17 +206,31 @@ fn expand(cfg: ProxyConfig) -> Result<TokenStream2> {
         )
     })?;
 
-    let serde_world_name = serde_world.value();
-    let serde_world_id = find_world_id(&resolve, &serde_world_name).ok_or_else(|| {
+    let world_name = world.value();
+    let world_id = find_world_id(&resolve, &world_name).ok_or_else(|| {
         syn::Error::new(
             Span::call_site(),
-            format!("world '{serde_world_name}' not found in {}", wit_input.display()),
+            format!("world '{world_name}' not found in {}", wit_input.display()),
         )
     })?;
 
+    let route_specs = if let Some(routes) = cfg.routes {
+        if routes.is_empty() {
+            return Err(syn::Error::new(
+                Span::call_site(),
+                "routes must not be empty when provided",
+            ));
+        }
+        routes
+    } else {
+        infer_routes_from_world(&resolve, world_id)?
+    };
+
+    let route_specs = apply_route_overrides(route_specs, cfg.route_overrides)?;
+
     let mut route_tokens = Vec::new();
 
-    for route in cfg.routes {
+    for route in route_specs {
         let parts: Vec<String> = route
             .wit_fn
             .segments
@@ -190,7 +249,7 @@ fn expand(cfg: ProxyConfig) -> Result<TokenStream2> {
         let function_name = parts[3].clone();
         let interface_wit = interface_mod.replace('_', "-");
 
-        let function = resolve_world_function(&resolve, serde_world_id, &interface_wit, &function_name)
+        let function = resolve_world_function(&resolve, world_id, &interface_wit, &function_name)
             .map_err(|msg| syn::Error::new(route.wit_fn.span(), msg))?;
 
         if function.params.len() != 1 {
@@ -229,12 +288,19 @@ fn expand(cfg: ProxyConfig) -> Result<TokenStream2> {
             quote! {}
         };
 
+        let subject_tokens = if let Some(subject) = route.subject {
+            quote! { , subject: #subject }
+        } else {
+            quote! {}
+        };
+
         route_tokens.push(quote! {
             #proxy_fn => {
                 wit_fn: #wit_fn,
                 input: #input_ty,
                 output: #output_ty
                 #timeout_tokens
+                #subject_tokens
             }
         });
     }
@@ -242,9 +308,7 @@ fn expand(cfg: ProxyConfig) -> Result<TokenStream2> {
     Ok(quote! {
         generate_wit_nats_proxy!(
             serde_mod: #serde_mod,
-            serde_world: #serde_world,
-            no_serde_mod: #no_serde_mod,
-            no_serde_world: #no_serde_world,
+            world: #world,
             global_prefix: #global_prefix,
             routes: [
                 #(#route_tokens),*
@@ -483,4 +547,126 @@ fn to_upper_camel(name: &str) -> String {
             }
         })
         .collect::<String>()
+}
+
+fn infer_routes_from_world(resolve: &Resolve, world_id: wit_parser::WorldId) -> Result<Vec<RouteSpec>> {
+    let world = &resolve.worlds[world_id];
+    let world_pkg = world.package;
+
+    let mut routes = Vec::new();
+
+    for item in world.imports.values() {
+        let interface_id = match item {
+            WorldItem::Interface { id, .. } => *id,
+            _ => continue,
+        };
+
+        let interface = &resolve.interfaces[interface_id];
+        let interface_name = interface
+            .name
+            .as_deref()
+            .unwrap_or("interface")
+            .to_string();
+
+        if interface.package.is_some() && interface.package != world_pkg {
+            continue;
+        }
+
+        let iface_ident = format_ident!("{}", sanitize_ident_segment(&interface_name));
+
+        let (ns_ident, pkg_ident) = if let Some(pkg_id) = interface.package {
+            let pkg = &resolve.packages[pkg_id];
+            (
+                format_ident!("{}", sanitize_ident_segment(&pkg.name.namespace.to_string())),
+                format_ident!("{}", sanitize_ident_segment(&pkg.name.name.to_string())),
+            )
+        } else if let Some(pkg_id) = world_pkg {
+            let pkg = &resolve.packages[pkg_id];
+            (
+                format_ident!("{}", sanitize_ident_segment(&pkg.name.namespace.to_string())),
+                format_ident!("{}", sanitize_ident_segment(&pkg.name.name.to_string())),
+            )
+        } else {
+            return Err(syn::Error::new(
+                Span::call_site(),
+                format!("interface '{interface_name}' has no package information"),
+            ));
+        };
+
+        for fn_name in interface.functions.keys() {
+            let rust_fn_name = sanitize_ident_segment(fn_name);
+            let fn_ident = format_ident!("{}", rust_fn_name);
+            let wit_fn = syn::parse2::<Path>(quote! { #ns_ident::#pkg_ident::#iface_ident::#fn_ident })
+                .map_err(|e| syn::Error::new(Span::call_site(), format!("failed to build inferred wit_fn path: {e}")))?;
+
+            let proxy_fn = Ident::new(&(rust_fn_name.clone() + "_nats"), Span::call_site());
+
+            routes.push(RouteSpec {
+                proxy_fn,
+                wit_fn,
+                timeout_ms: None,
+                subject: None,
+            });
+        }
+    }
+
+    if routes.is_empty() {
+        return Err(syn::Error::new(
+            Span::call_site(),
+            format!(
+                "no inferable routes found in world '{}' (expected imported interfaces from the same package)",
+                world.name
+            ),
+        ));
+    }
+
+    Ok(routes)
+}
+
+fn sanitize_ident_segment(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    for c in input.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            output.push(c);
+        } else {
+            output.push('_');
+        }
+    }
+    output
+}
+
+fn apply_route_overrides(
+    mut routes: Vec<RouteSpec>,
+    overrides: Option<Vec<RouteOverrideSpec>>,
+) -> Result<Vec<RouteSpec>> {
+    let Some(overrides) = overrides else {
+        return Ok(routes);
+    };
+
+    for override_spec in overrides {
+        let override_name = override_spec.proxy_fn.to_string();
+        let mut matched = false;
+
+        for route in &mut routes {
+            if route.proxy_fn == override_spec.proxy_fn {
+                if override_spec.timeout_ms.is_some() {
+                    route.timeout_ms = override_spec.timeout_ms.clone();
+                }
+                if override_spec.subject.is_some() {
+                    route.subject = override_spec.subject.clone();
+                }
+                matched = true;
+                break;
+            }
+        }
+
+        if !matched {
+            return Err(syn::Error::new(
+                override_spec.proxy_fn.span(),
+                format!("route_overrides entry '{override_name}' did not match any route"),
+            ));
+        }
+    }
+
+    Ok(routes)
 }
