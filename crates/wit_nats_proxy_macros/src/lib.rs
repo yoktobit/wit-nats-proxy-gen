@@ -92,7 +92,6 @@ impl Parse for RouteOverrideSpec {
 }
 
 struct ProxyConfig {
-    serde_mod: Option<Ident>,
     world: LitStr,
     global_prefix: Option<LitStr>,
     wit_path: Option<LitStr>,
@@ -102,7 +101,6 @@ struct ProxyConfig {
 
 impl Parse for ProxyConfig {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
-        let mut serde_mod: Option<Ident> = None;
         let mut world: Option<LitStr> = None;
         let mut global_prefix: Option<LitStr> = None;
         let mut wit_path: Option<LitStr> = None;
@@ -114,7 +112,6 @@ impl Parse for ProxyConfig {
             input.parse::<Token![:]>()?;
 
             match key.to_string().as_str() {
-                "serde_mod" => serde_mod = Some(input.parse()?),
                 "world" => world = Some(input.parse()?),
                 "global_prefix" => global_prefix = Some(input.parse()?),
                 "wit_path" => wit_path = Some(input.parse()?),
@@ -151,7 +148,6 @@ impl Parse for ProxyConfig {
         }
 
         Ok(Self {
-            serde_mod,
             world: world.ok_or_else(|| syn::Error::new(Span::call_site(), "missing world"))?,
             global_prefix,
             wit_path,
@@ -172,17 +168,18 @@ pub fn generate_wit_nats_proxy_from_wit(input: TokenStream) -> TokenStream {
 }
 
 fn expand(cfg: ProxyConfig) -> Result<TokenStream2> {
-    let world = cfg.world;
+    let ProxyConfig {
+        world,
+        global_prefix,
+        wit_path,
+        routes,
+        route_overrides,
+    } = cfg;
 
-    let serde_mod = cfg
-        .serde_mod
-        .unwrap_or_else(|| Ident::new("serde_world_bindings", Span::call_site()));
-    let global_prefix = cfg
-        .global_prefix
+    let global_prefix = global_prefix
         .unwrap_or_else(|| LitStr::new("default", Span::call_site()));
 
-    let wit_rel = cfg
-        .wit_path
+    let wit_rel = wit_path
         .unwrap_or_else(|| LitStr::new("wit/world.wit", Span::call_site()));
 
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
@@ -214,7 +211,7 @@ fn expand(cfg: ProxyConfig) -> Result<TokenStream2> {
         )
     })?;
 
-    let route_specs = if let Some(routes) = cfg.routes {
+    let route_specs = if let Some(routes) = routes {
         if routes.is_empty() {
             return Err(syn::Error::new(
                 Span::call_site(),
@@ -226,7 +223,7 @@ fn expand(cfg: ProxyConfig) -> Result<TokenStream2> {
         infer_routes_from_world(&resolve, world_id)?
     };
 
-    let route_specs = apply_route_overrides(route_specs, cfg.route_overrides)?;
+    let route_specs = apply_route_overrides(route_specs, route_overrides)?;
 
     let mut route_tokens = Vec::new();
 
@@ -307,7 +304,6 @@ fn expand(cfg: ProxyConfig) -> Result<TokenStream2> {
 
     Ok(quote! {
         wit_nats_proxy::generate_wit_nats_proxy!(
-            serde_mod: #serde_mod,
             world: #world,
             global_prefix: #global_prefix,
             routes: [

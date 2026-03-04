@@ -4,8 +4,8 @@ generate_wit_nats_proxy_from_wit!(
     world: "acme-world-serde",
 );
 
-use crate::serde_world_bindings::acme::app::external_function::ExternalInput;
-use crate::serde_world_bindings::exports::acme::app::acme_interface::{AcmeInput, Guest};
+use crate::acme::app::external_function::ExternalInput;
+use crate::exports::acme::app::acme_interface::{AcmeInput, Guest};
 
 struct Component;
 
@@ -15,4 +15,4 @@ impl Guest for Component {
     }
 }
 
-serde_world_bindings::export!(Component with_types_in serde_world_bindings);
+export!(Component with_types_in self);

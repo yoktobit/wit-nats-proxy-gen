@@ -22,7 +22,7 @@ wit_nats_proxy_macros = { path = "../../crates/wit_nats_proxy_macros" }
 
 ## What it generates
 
-- A `serde`-enabled bindings module (default: `serde_world_bindings`)
+- `serde`-enabled bindings generated in place at the macro invocation site
 - One proxy function per route (explicit or inferred), each returning `Result<Output, String>`
 - NATS request/response wiring via `wasmcloud:messaging/consumer@0.2.0`
 
@@ -39,7 +39,6 @@ generate_wit_nats_proxy_from_wit!(
 
 ## Optional input
 
-- `serde_mod`: Rust module name for generated serde bindings (default: `serde_world_bindings`)
 - `global_prefix`: Subject prefix for default subjects (default: `"default"`)
 - `wit_path`: Path to your WIT entry (default: `"wit/world.wit"`)
 - `routes`: Explicit route list
@@ -117,8 +116,8 @@ generate_wit_nats_proxy_from_wit!(
     world: "acme-world-serde",
 );
 
-use crate::serde_world_bindings::acme::app::external_function::ExternalInput;
-use crate::serde_world_bindings::exports::acme::app::acme_interface::{AcmeInput, Guest};
+use crate::acme::app::external_function::ExternalInput;
+use crate::exports::acme::app::acme_interface::{AcmeInput, Guest};
 
 struct Component;
 
@@ -128,7 +127,7 @@ impl Guest for Component {
     }
 }
 
-serde_world_bindings::export!(Component with_types_in serde_world_bindings);
+export!(Component with_types_in self);
 ```
 
 ## Notes
