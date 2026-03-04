@@ -9,8 +9,8 @@ dependencies = [
  "serde",
  "serde_json",
  "wit-bindgen",
+ "wit-wasmcloud-messaging-bindgen",
  "wit_nats_proxy",
- "wit_nats_proxy_macros",
 ]
 
 [[package]]
@@ -319,22 +319,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "wit_nats_proxy"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "wit-bindgen",
-]
-
-[[package]]
-name = "wit_nats_proxy_macros"
+name = "wit-wasmcloud-messaging-bindgen"
 version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn",
  "wit-parser",
+]
+
+[[package]]
+name = "wit_nats_proxy"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "wit-bindgen",
 ]
 
 [[package]]

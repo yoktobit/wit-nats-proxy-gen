@@ -1,4 +1,4 @@
-# wit_nats_proxy_macros
+# wit-wasmcloud-messaging-bindgen
 
 Procedural macro helpers to generate NATS proxy functions from WIT worlds.
 
@@ -17,7 +17,7 @@ Your crate should depend on both crates:
 ```toml
 [dependencies]
 wit_nats_proxy = { path = "../../crates/wit_nats_proxy" }
-wit_nats_proxy_macros = { path = "../../crates/wit_nats_proxy_macros" }
+wit-wasmcloud-messaging-bindgen = { path = "../../crates/wit-wasmcloud-messaging-bindgen" }
 ```
 
 ## What it generates
@@ -110,7 +110,7 @@ Each routed WIT function must have exactly one parameter.
 ## Minimal end-to-end example
 
 ```rust
-use wit_nats_proxy_macros::generate_wit_nats_proxy_from_wit;
+use wit_wasmcloud_messaging_bindgen::generate_wit_nats_proxy_from_wit;
 
 generate_wit_nats_proxy_from_wit!(
     world: "acme-world-serde",

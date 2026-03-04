@@ -1,5 +1,5 @@
 [package]
-name = "wit_nats_proxy_macros"
+name = "wit-wasmcloud-messaging-bindgen"
 version = "0.1.0"
 edition = "2024"
 

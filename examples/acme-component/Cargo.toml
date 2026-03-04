@@ -11,4 +11,4 @@ wit-bindgen = "0.53.1"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 wit_nats_proxy = { path = "../../crates/wit_nats_proxy" }
-wit_nats_proxy_macros = { path = "../../crates/wit_nats_proxy_macros" }
+wit-wasmcloud-messaging-bindgen = { path = "../../crates/wit-wasmcloud-messaging-bindgen" }

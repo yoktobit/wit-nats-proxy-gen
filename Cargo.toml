@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
 	"crates/wit_nats_proxy",
-	"crates/wit_nats_proxy_macros",
+	"crates/wit-wasmcloud-messaging-bindgen",
 	"examples/acme-component",
 ]
 

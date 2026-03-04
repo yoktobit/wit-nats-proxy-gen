@@ -1,4 +1,4 @@
-use wit_nats_proxy_macros::generate_wit_nats_proxy_from_wit;
+use wit_wasmcloud_messaging_bindgen::generate_wit_nats_proxy_from_wit;
 
 generate_wit_nats_proxy_from_wit!(
     world: "acme-world-serde",
