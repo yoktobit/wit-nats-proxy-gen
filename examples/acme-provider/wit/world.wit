@@ -1,0 +1,13 @@
+package acme:app@0.0.1;
+
+interface acme-interface {
+    record acme-input {
+        name: string,
+    }
+
+    handle: func(input: acme-input) -> result<string, string>;
+}
+
+world provider-world {
+    export acme-interface;
+}

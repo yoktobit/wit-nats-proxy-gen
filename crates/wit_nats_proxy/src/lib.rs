@@ -211,7 +211,7 @@ macro_rules! generate_wit_nats_provider_proxy {
         ]
         $(,)?
     ) => {
-        generate_wit_nats_provider_proxy!(
+        $crate::generate_wit_nats_provider_proxy!(
             world: $world,
             global_prefix: "default",
             routes: [
@@ -264,7 +264,7 @@ macro_rules! generate_wit_nats_provider_proxy {
         ) -> Result<(), String> {
             match msg.subject.as_str() {
                 $(
-                    {
+                    s if s == {
                         let route_subject = concat!("rpc.", $global_prefix, ".", stringify!($handler_fn));
                         $(let route_subject = $subject;)?
                         route_subject

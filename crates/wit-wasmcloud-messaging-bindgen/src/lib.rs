@@ -101,7 +101,7 @@ struct ProxyConfig {
     route_overrides: Option<Vec<RouteOverrideSpec>>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum MacroTarget {
     Consumer,
     Provider,
@@ -279,6 +279,8 @@ fn expand(cfg: ProxyConfig, target: MacroTarget) -> Result<TokenStream2> {
         let interface_mod = parts[2].clone();
         let function_name = parts[3].clone();
         let interface_wit = interface_mod.replace('_', "-");
+        let from_exports = target == MacroTarget::Provider
+            && interface_is_exported_in_world(&resolve, world_id, &interface_wit);
 
         let function = resolve_world_function(&resolve, world_id, &interface_wit, &function_name)
             .map_err(|msg| syn::Error::new(route.wit_fn.span(), msg))?;
@@ -300,6 +302,7 @@ fn expand(cfg: ProxyConfig, target: MacroTarget) -> Result<TokenStream2> {
             &parts[0],
             &parts[1],
             &interface_mod,
+            from_exports,
         )?;
 
         let output_ty = results_ok_type_to_tokens(
@@ -308,6 +311,7 @@ fn expand(cfg: ProxyConfig, target: MacroTarget) -> Result<TokenStream2> {
             &parts[0],
             &parts[1],
             &interface_mod,
+            from_exports,
         )?;
 
         let proxy_fn = route.proxy_fn;
@@ -442,15 +446,34 @@ fn resolve_world_function<'a>(
         })
 }
 
+fn interface_is_exported_in_world(
+    resolve: &Resolve,
+    world_id: wit_parser::WorldId,
+    interface_name: &str,
+) -> bool {
+    let world = &resolve.worlds[world_id];
+    let needle = normalize_interface_name(interface_name);
+    world.exports.iter().any(|(key, item)| {
+        matches!((key, item), (WorldKey::Name(name), WorldItem::Interface { .. }) if normalize_interface_name(name) == needle)
+    })
+}
+
+fn normalize_interface_name(name: &str) -> String {
+    let base = name.split('@').next().unwrap_or(name);
+    let tail = base.rsplit('/').next().unwrap_or(base);
+    tail.replace('-', "_")
+}
+
 fn results_ok_type_to_tokens(
     resolve: &Resolve,
     result: &Option<Type>,
     ns: &str,
     pkg: &str,
     interface_mod: &str,
+    from_exports: bool,
 ) -> Result<TokenStream2> {
     match result {
-        Some(ty) => extract_ok_from_type(resolve, ty, ns, pkg, interface_mod),
+        Some(ty) => extract_ok_from_type(resolve, ty, ns, pkg, interface_mod, from_exports),
         None => Ok(quote! { () }),
     }
 }
@@ -461,19 +484,20 @@ fn extract_ok_from_type(
     ns: &str,
     pkg: &str,
     interface_mod: &str,
+    from_exports: bool,
 ) -> Result<TokenStream2> {
     if let Type::Id(type_id) = ty {
         let type_def = &resolve.types[*type_id];
         if let TypeDefKind::Result(result_ty) = &type_def.kind {
             if let Some(ok_ty) = &result_ty.ok {
-                return wit_type_to_tokens(resolve, ok_ty, ns, pkg, interface_mod);
+                return wit_type_to_tokens(resolve, ok_ty, ns, pkg, interface_mod, from_exports);
             }
 
             return Ok(quote! { () });
         }
     }
 
-    wit_type_to_tokens(resolve, ty, ns, pkg, interface_mod)
+    wit_type_to_tokens(resolve, ty, ns, pkg, interface_mod, from_exports)
 }
 
 fn wit_type_to_tokens(
@@ -482,6 +506,7 @@ fn wit_type_to_tokens(
     ns: &str,
     pkg: &str,
     interface_mod: &str,
+    from_exports: bool,
 ) -> Result<TokenStream2> {
     match ty {
         Type::Bool => Ok(quote! { bool }),
@@ -498,7 +523,9 @@ fn wit_type_to_tokens(
         Type::Char => Ok(quote! { char }),
         Type::String => Ok(quote! { String }),
         Type::ErrorContext => Ok(quote! { String }),
-        Type::Id(type_id) => wit_type_def_to_tokens(resolve, *type_id, ns, pkg, interface_mod),
+        Type::Id(type_id) => {
+            wit_type_def_to_tokens(resolve, *type_id, ns, pkg, interface_mod, from_exports)
+        }
     }
 }
 
@@ -508,34 +535,37 @@ fn wit_type_def_to_tokens(
     ns: &str,
     pkg: &str,
     interface_mod: &str,
+    from_exports: bool,
 ) -> Result<TokenStream2> {
     let type_def = &resolve.types[type_id];
 
     match &type_def.kind {
-        TypeDefKind::Type(inner) => wit_type_to_tokens(resolve, inner, ns, pkg, interface_mod),
+        TypeDefKind::Type(inner) => {
+            wit_type_to_tokens(resolve, inner, ns, pkg, interface_mod, from_exports)
+        }
         TypeDefKind::Option(inner) => {
-            let inner_ty = wit_type_to_tokens(resolve, inner, ns, pkg, interface_mod)?;
+            let inner_ty = wit_type_to_tokens(resolve, inner, ns, pkg, interface_mod, from_exports)?;
             Ok(quote! { Option<#inner_ty> })
         }
         TypeDefKind::List(inner) => {
-            let inner_ty = wit_type_to_tokens(resolve, inner, ns, pkg, interface_mod)?;
+            let inner_ty = wit_type_to_tokens(resolve, inner, ns, pkg, interface_mod, from_exports)?;
             Ok(quote! { Vec<#inner_ty> })
         }
         TypeDefKind::Tuple(tuple) => {
             let mut tuple_items = Vec::with_capacity(tuple.types.len());
             for item in &tuple.types {
-                tuple_items.push(wit_type_to_tokens(resolve, item, ns, pkg, interface_mod)?);
+                tuple_items.push(wit_type_to_tokens(resolve, item, ns, pkg, interface_mod, from_exports)?);
             }
             Ok(quote! { ( #(#tuple_items),* ) })
         }
         TypeDefKind::Result(result_ty) => {
             let ok_ty = if let Some(ok) = &result_ty.ok {
-                wit_type_to_tokens(resolve, ok, ns, pkg, interface_mod)?
+                wit_type_to_tokens(resolve, ok, ns, pkg, interface_mod, from_exports)?
             } else {
                 quote! { () }
             };
             let err_ty = if let Some(err) = &result_ty.err {
-                wit_type_to_tokens(resolve, err, ns, pkg, interface_mod)?
+                wit_type_to_tokens(resolve, err, ns, pkg, interface_mod, from_exports)?
             } else {
                 quote! { () }
             };
@@ -543,7 +573,7 @@ fn wit_type_def_to_tokens(
         }
         TypeDefKind::Future(inner) => {
             let value_ty = if let Some(value) = inner {
-                wit_type_to_tokens(resolve, value, ns, pkg, interface_mod)?
+                wit_type_to_tokens(resolve, value, ns, pkg, interface_mod, from_exports)?
             } else {
                 quote! { () }
             };
@@ -551,17 +581,23 @@ fn wit_type_def_to_tokens(
         }
         TypeDefKind::Stream(stream) => {
             let element_ty = if let Some(value) = stream {
-                wit_type_to_tokens(resolve, value, ns, pkg, interface_mod)?
+                wit_type_to_tokens(resolve, value, ns, pkg, interface_mod, from_exports)?
             } else {
                 quote! { () }
             };
             Ok(quote! { Vec<#element_ty> })
         }
-        _ => named_type_path(type_def.name.as_deref(), ns, pkg, interface_mod),
+        _ => named_type_path(type_def.name.as_deref(), ns, pkg, interface_mod, from_exports),
     }
 }
 
-fn named_type_path(name: Option<&str>, ns: &str, pkg: &str, interface_mod: &str) -> Result<TokenStream2> {
+fn named_type_path(
+    name: Option<&str>,
+    ns: &str,
+    pkg: &str,
+    interface_mod: &str,
+    from_exports: bool,
+) -> Result<TokenStream2> {
     let Some(type_name) = name else {
         return Err(syn::Error::new(
             Span::call_site(),
@@ -574,7 +610,11 @@ fn named_type_path(name: Option<&str>, ns: &str, pkg: &str, interface_mod: &str)
     let interface_ident = format_ident!("{}", interface_mod);
     let type_ident = format_ident!("{}", to_upper_camel(type_name));
 
-    Ok(quote! { #ns_ident::#pkg_ident::#interface_ident::#type_ident })
+    if from_exports {
+        Ok(quote! { crate::exports::#ns_ident::#pkg_ident::#interface_ident::#type_ident })
+    } else {
+        Ok(quote! { #ns_ident::#pkg_ident::#interface_ident::#type_ident })
+    }
 }
 
 fn to_upper_camel(name: &str) -> String {

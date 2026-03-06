@@ -7,6 +7,7 @@ This repository is now a workspace-first layout where reusable crates are the co
 - `crates/wit_nats_proxy` — runtime macros (`generate_wit_nats_consumer_proxy!`, `generate_wit_nats_provider_proxy!`)
 - `crates/wit-wasmcloud-messaging-bindgen` — proc-macro crate (`generate_wit_nats_consumer_proxy_from_wit!`, `generate_wit_nats_provider_proxy_from_wit!`)
 - `examples/acme-component` — example component crate using the macros
+- `examples/acme-provider` — provider example using generated `wasmcloud:messaging/handler` Guest wiring
 
 Examples live under `examples/` as separate crates, similar to other Rust workspaces.
 
