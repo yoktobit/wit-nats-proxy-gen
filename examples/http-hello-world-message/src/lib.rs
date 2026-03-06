@@ -1,8 +1,8 @@
 use wstd::http::{Body, Request, Response, StatusCode};
 
-use wit_wasmcloud_messaging_bindgen::generate_wit_nats_proxy_from_wit;
+use wit_wasmcloud_messaging_bindgen::generate_wit_nats_consumer_proxy_from_wit;
 
-generate_wit_nats_proxy_from_wit!(
+generate_wit_nats_consumer_proxy_from_wit!(
     world: "outer-space",
     bindings_world: "hello",
 );

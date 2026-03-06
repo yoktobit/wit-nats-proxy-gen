@@ -1,6 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
@@ -100,6 +101,12 @@ struct ProxyConfig {
     route_overrides: Option<Vec<RouteOverrideSpec>>,
 }
 
+#[derive(Clone, Copy)]
+enum MacroTarget {
+    Consumer,
+    Provider,
+}
+
 impl Parse for ProxyConfig {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let mut world: Option<LitStr> = None;
@@ -162,16 +169,36 @@ impl Parse for ProxyConfig {
 }
 
 #[proc_macro]
-pub fn generate_wit_nats_proxy_from_wit(input: TokenStream) -> TokenStream {
+pub fn generate_wit_nats_consumer_proxy_from_wit(input: TokenStream) -> TokenStream {
     let cfg = parse_macro_input!(input as ProxyConfig);
 
-    match expand(cfg) {
+    match expand(cfg, MacroTarget::Consumer) {
         Ok(tokens) => tokens.into(),
         Err(err) => err.to_compile_error().into(),
     }
 }
 
-fn expand(cfg: ProxyConfig) -> Result<TokenStream2> {
+#[proc_macro]
+pub fn generate_wit_nats_provider_proxy_from_wit(input: TokenStream) -> TokenStream {
+    let cfg = parse_macro_input!(input as ProxyConfig);
+
+    match expand(cfg, MacroTarget::Provider) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+#[proc_macro]
+pub fn generate_wit_nats_proxy_from_wit(input: TokenStream) -> TokenStream {
+    let cfg = parse_macro_input!(input as ProxyConfig);
+
+    match expand(cfg, MacroTarget::Consumer) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+fn expand(cfg: ProxyConfig, target: MacroTarget) -> Result<TokenStream2> {
     let ProxyConfig {
         world,
         bindings_world,
@@ -227,7 +254,7 @@ fn expand(cfg: ProxyConfig) -> Result<TokenStream2> {
         }
         routes
     } else {
-        infer_routes_from_world(&resolve, world_id)?
+        infer_routes_from_world(&resolve, world_id, target)?
     };
 
     let route_specs = apply_route_overrides(route_specs, route_overrides)?;
@@ -309,16 +336,27 @@ fn expand(cfg: ProxyConfig) -> Result<TokenStream2> {
         });
     }
 
-    Ok(quote! {
-        wit_nats_proxy::generate_wit_nats_proxy!(
-            world: #world,
-            bindings_world: #bindings_world,
-            global_prefix: #global_prefix,
-            routes: [
-                #(#route_tokens),*
-            ],
-        );
-    })
+    match target {
+        MacroTarget::Consumer => Ok(quote! {
+            wit_nats_proxy::generate_wit_nats_consumer_proxy!(
+                world: #world,
+                bindings_world: #bindings_world,
+                global_prefix: #global_prefix,
+                routes: [
+                    #(#route_tokens),*
+                ],
+            );
+        }),
+        MacroTarget::Provider => Ok(quote! {
+            wit_nats_proxy::generate_wit_nats_provider_proxy!(
+                world: #world,
+                global_prefix: #global_prefix,
+                routes: [
+                    #(#route_tokens),*
+                ],
+            );
+        }),
+    }
 }
 
 fn find_world_id(resolve: &Resolve, world_name: &str) -> Option<wit_parser::WorldId> {
@@ -553,13 +591,23 @@ fn to_upper_camel(name: &str) -> String {
         .collect::<String>()
 }
 
-fn infer_routes_from_world(resolve: &Resolve, world_id: wit_parser::WorldId) -> Result<Vec<RouteSpec>> {
+fn infer_routes_from_world(
+    resolve: &Resolve,
+    world_id: wit_parser::WorldId,
+    target: MacroTarget,
+) -> Result<Vec<RouteSpec>> {
     let world = &resolve.worlds[world_id];
     let world_pkg = world.package;
 
     let mut routes = Vec::new();
+    let mut used_proxy_names = HashSet::new();
 
-    for item in world.imports.values().chain(world.exports.values()) {
+    let world_items = match target {
+        MacroTarget::Consumer => world.imports.values(),
+        MacroTarget::Provider => world.exports.values(),
+    };
+
+    for item in world_items {
         let interface_id = match item {
             WorldItem::Interface { id, .. } => *id,
             _ => continue,
@@ -603,7 +651,24 @@ fn infer_routes_from_world(resolve: &Resolve, world_id: wit_parser::WorldId) -> 
             let wit_fn = syn::parse2::<Path>(quote! { #ns_ident::#pkg_ident::#iface_ident::#fn_ident })
                 .map_err(|e| syn::Error::new(Span::call_site(), format!("failed to build inferred wit_fn path: {e}")))?;
 
-            let proxy_fn = Ident::new(&(rust_fn_name.clone() + "_nats"), Span::call_site());
+            let mut inferred_name = match target {
+                MacroTarget::Consumer => rust_fn_name.clone() + "_nats",
+                MacroTarget::Provider => rust_fn_name.clone(),
+            };
+
+            if used_proxy_names.contains(&inferred_name) {
+                inferred_name = match target {
+                    MacroTarget::Consumer => {
+                        format!("{}_{}_nats", sanitize_ident_segment(&interface_name), rust_fn_name)
+                    }
+                    MacroTarget::Provider => {
+                        format!("{}_{}", sanitize_ident_segment(&interface_name), rust_fn_name)
+                    }
+                };
+            }
+
+            used_proxy_names.insert(inferred_name.clone());
+            let proxy_fn = Ident::new(&inferred_name, Span::call_site());
 
             routes.push(RouteSpec {
                 proxy_fn,

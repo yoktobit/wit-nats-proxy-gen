@@ -2,13 +2,18 @@
 
 Procedural macro helpers to generate NATS proxy functions from WIT worlds.
 
-## Macro
+## Macros
 
 ```rust
-generate_wit_nats_proxy_from_wit!(...)
+generate_wit_nats_consumer_proxy_from_wit!(...)
+generate_wit_nats_provider_proxy_from_wit!(...)
 ```
 
-This macro reads your WIT definitions, resolves function signatures, and expands to the runtime `generate_wit_nats_proxy!` macro.
+These macros read your WIT definitions, resolve function signatures, and expand to runtime macros in `wit_nats_proxy`.
+
+- `generate_wit_nats_consumer_proxy_from_wit!` generates NATS request/response consumer helpers.
+- `generate_wit_nats_provider_proxy_from_wit!` generates a provider `Guest` implementation plus a public `handle` dispatcher.
+- `generate_wit_nats_proxy_from_wit!` remains available as a compatibility alias to the consumer macro.
 
 ## Required dependencies
 
@@ -29,7 +34,7 @@ wit-wasmcloud-messaging-bindgen = { path = "../../crates/wit-wasmcloud-messaging
 ## Required input
 
 ```rust
-generate_wit_nats_proxy_from_wit!(
+generate_wit_nats_consumer_proxy_from_wit!(
     world: "proxy-schema",
     bindings_world: "hello",
     wit_path: "../../wit/world.wit",
@@ -52,7 +57,7 @@ generate_wit_nats_proxy_from_wit!(
 ### 1) Explicit routes
 
 ```rust
-generate_wit_nats_proxy_from_wit!(
+generate_wit_nats_consumer_proxy_from_wit!(
     world: "acme-world-serde",
     routes: [
         handle_nats => {
@@ -85,7 +90,7 @@ Example: WIT function `handle` becomes proxy `handle_nats`.
 Use `route_overrides` to customize only selected inferred (or explicit) routes:
 
 ```rust
-generate_wit_nats_proxy_from_wit!(
+generate_wit_nats_consumer_proxy_from_wit!(
     world: "acme-world-serde",
     route_overrides: [
         handle_nats => {
@@ -113,9 +118,9 @@ Each routed WIT function must have exactly one parameter.
 ## Minimal end-to-end example
 
 ```rust
-use wit_wasmcloud_messaging_bindgen::generate_wit_nats_proxy_from_wit;
+use wit_wasmcloud_messaging_bindgen::generate_wit_nats_consumer_proxy_from_wit;
 
-generate_wit_nats_proxy_from_wit!(
+generate_wit_nats_consumer_proxy_from_wit!(
     world: "acme-world-serde",
 );
 
@@ -145,6 +150,12 @@ To use generated NATS proxy functions, your component runtime world must include
 
 ```wit
 import wasmcloud:messaging/consumer@0.2.0;
+```
+
+For provider generation, your world must include the wasmCloud messaging handler export:
+
+```wit
+export wasmcloud:messaging/handler@0.2.0;
 ```
 
 Example:
