@@ -1,0 +1,14 @@
+package wasmcloud:hello;
+
+interface outer-space-handler {
+   handle: func(name: string) -> result<string, string>;
+}
+
+world outer-space {
+   export outer-space-handler;
+}
+
+world hello {
+   export wasi:http/incoming-handler@0.2.2;
+   import wasmcloud:messaging/consumer@0.2.0;
+}

@@ -93,6 +93,7 @@ impl Parse for RouteOverrideSpec {
 
 struct ProxyConfig {
     world: LitStr,
+    bindings_world: Option<LitStr>,
     global_prefix: Option<LitStr>,
     wit_path: Option<LitStr>,
     routes: Option<Vec<RouteSpec>>,
@@ -102,6 +103,7 @@ struct ProxyConfig {
 impl Parse for ProxyConfig {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let mut world: Option<LitStr> = None;
+        let mut bindings_world: Option<LitStr> = None;
         let mut global_prefix: Option<LitStr> = None;
         let mut wit_path: Option<LitStr> = None;
         let mut routes: Option<Vec<RouteSpec>> = None;
@@ -113,6 +115,7 @@ impl Parse for ProxyConfig {
 
             match key.to_string().as_str() {
                 "world" => world = Some(input.parse()?),
+                "bindings_world" => bindings_world = Some(input.parse()?),
                 "global_prefix" => global_prefix = Some(input.parse()?),
                 "wit_path" => wit_path = Some(input.parse()?),
                 "routes" => {
@@ -149,6 +152,7 @@ impl Parse for ProxyConfig {
 
         Ok(Self {
             world: world.ok_or_else(|| syn::Error::new(Span::call_site(), "missing world"))?,
+            bindings_world,
             global_prefix,
             wit_path,
             routes,
@@ -170,11 +174,14 @@ pub fn generate_wit_nats_proxy_from_wit(input: TokenStream) -> TokenStream {
 fn expand(cfg: ProxyConfig) -> Result<TokenStream2> {
     let ProxyConfig {
         world,
+        bindings_world,
         global_prefix,
         wit_path,
         routes,
         route_overrides,
     } = cfg;
+
+    let bindings_world = bindings_world.unwrap_or_else(|| world.clone());
 
     let global_prefix = global_prefix
         .unwrap_or_else(|| LitStr::new("default", Span::call_site()));
@@ -305,6 +312,7 @@ fn expand(cfg: ProxyConfig) -> Result<TokenStream2> {
     Ok(quote! {
         wit_nats_proxy::generate_wit_nats_proxy!(
             world: #world,
+            bindings_world: #bindings_world,
             global_prefix: #global_prefix,
             routes: [
                 #(#route_tokens),*
@@ -551,7 +559,7 @@ fn infer_routes_from_world(resolve: &Resolve, world_id: wit_parser::WorldId) -> 
 
     let mut routes = Vec::new();
 
-    for item in world.imports.values() {
+    for item in world.imports.values().chain(world.exports.values()) {
         let interface_id = match item {
             WorldItem::Interface { id, .. } => *id,
             _ => continue,
@@ -610,7 +618,7 @@ fn infer_routes_from_world(resolve: &Resolve, world_id: wit_parser::WorldId) -> 
         return Err(syn::Error::new(
             Span::call_site(),
             format!(
-                "no inferable routes found in world '{}' (expected imported interfaces from the same package)",
+                "no inferable routes found in world '{}' (expected imported or exported interfaces from the same package)",
                 world.name
             ),
         ));

@@ -30,12 +30,14 @@ wit-wasmcloud-messaging-bindgen = { path = "../../crates/wit-wasmcloud-messaging
 
 ```rust
 generate_wit_nats_proxy_from_wit!(
-    world: "acme-world-serde",
+    world: "proxy-schema",
+    bindings_world: "hello",
     wit_path: "../../wit/world.wit",
 );
 ```
 
-- `world`: WIT world name to use for signature resolution and bindings generation.
+- `world`: WIT world name used for route inference and signature resolution.
+- `bindings_world` (optional): WIT world used by runtime `wit_bindgen` generation (defaults to `world`).
 
 ## Optional input
 
@@ -43,6 +45,7 @@ generate_wit_nats_proxy_from_wit!(
 - `wit_path`: Path to your WIT entry (default: `"wit/world.wit"`)
 - `routes`: Explicit route list
 - `route_overrides`: Override timeout/subject for existing routes (explicit or inferred)
+- `bindings_world`: Runtime bindings world (when omitted, `world` is used)
 
 ## Route behavior
 
@@ -69,7 +72,7 @@ Route fields:
 
 ### 2) Inferred routes (when `routes` is omitted)
 
-If `routes` is not provided, routes are inferred from imported interfaces in the selected `world`.
+If `routes` is not provided, routes are inferred from imported or exported interfaces in the selected `world`.
 
 Generated proxy naming rule:
 
@@ -135,3 +138,34 @@ export!(Component with_types_in self);
 - `wit_path` is resolved relative to `CARGO_MANIFEST_DIR`.
 - The macro uses `wit_parser` at compile time; errors are surfaced as Rust compile errors.
 - For defaults, subjects are built as: `rpc.<global_prefix>.<proxy_fn>`.
+
+## WIT requirements
+
+To use generated NATS proxy functions, your component runtime world must include:
+
+```wit
+import wasmcloud:messaging/consumer@0.2.0;
+```
+
+Example:
+
+```wit
+world hello {
+    export wasi:http/incoming-handler@0.2.2;
+    import wasmcloud:messaging/consumer@0.2.0;
+}
+
+For route inference/signature extraction, prefer a separate schema world that exports your app interface:
+
+```wit
+world proxy-schema {
+    export outer-space-handler;
+}
+```
+```
+
+Also ensure your component has the dependency package in `wit/deps`:
+
+- `wit/deps/wasmcloud-messaging-0.2.0/package.wit`
+
+Without this import + dep package, `cargo check` / `wash build` can fail with errors like `package 'wasmcloud:messaging@0.2.0' not found`.

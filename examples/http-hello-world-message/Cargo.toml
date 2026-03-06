@@ -1,0 +1,18 @@
+[package]
+name = "hello-world"
+edition = "2024"
+version = "0.1.0"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wstd = "0.6.3"
+wit_nats_proxy = { path = "../../crates/wit_nats_proxy" }
+wit-wasmcloud-messaging-bindgen = { path = "../../crates/wit-wasmcloud-messaging-bindgen" }
+serde ={ version="1.0.228", features = [ "derive" ]}
+serde_json = "1"
+wit-bindgen = "0.53.1"
+#wasmcloud-component = "0.2.0"

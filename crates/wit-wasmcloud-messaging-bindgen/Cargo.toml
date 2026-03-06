@@ -11,3 +11,4 @@ proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full", "parsing"] }
 wit-parser = "0.245.1"
+wit-bindgen = "0.53.1"
