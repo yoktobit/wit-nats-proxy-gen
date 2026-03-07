@@ -5,7 +5,7 @@ interface outer-space-handler {
 }
 
 world outer-space {
-   export outer-space-handler;
+   import outer-space-handler;
 }
 
 world hello {
