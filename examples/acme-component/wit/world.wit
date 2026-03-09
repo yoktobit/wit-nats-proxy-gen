@@ -7,19 +7,13 @@ interface external-function {
     handle: func(input: external-input) -> result<string, string>;
 }
 
-interface acme-interface {
-    record acme-input {
-        name: string, 
-    }
-    handle: func(input: acme-input) -> result<string, string>;
-}
-
 world acme-world-no-serde {
     import external-function;
     import wasmcloud:messaging/consumer@0.2.0;
 }
 
 world acme-world-serde {
-    export acme-interface;
+    export wasi:http/incoming-handler@0.2.2;
     import external-function;
+    import wasmcloud:messaging/consumer@0.2.0;
 }
