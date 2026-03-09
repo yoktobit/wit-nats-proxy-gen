@@ -1,24 +1,18 @@
-wit_bindgen::generate!({
-    path: "wit",
-    world: "provider-world",
-    additional_derives: [serde::Serialize, serde::Deserialize],
-    generate_all,
-});
+use wit_wasmcloud_messaging_bindgen::generate_wit_nats_provider_proxy_from_wit;
 
-wit_nats_proxy::generate_wit_nats_provider_proxy!(
+generate_wit_nats_provider_proxy_from_wit!(
     world: "provider-world",
+    generate_bindings: true,
     routes: [
         app_handle => {
-            wit_fn: acme::app::acme_interface::handle,
-            input: exports::acme::app::acme_interface::AcmeInput,
-            output: String,
+            wit_fn: acme::app::external_function::handle,
             subject: "rpc.acme.handle",
         },
     ],
 );
 
-use crate::exports::acme::app::acme_interface::AcmeInput;
+use crate::exports::acme::app::external_function::ExternalInput;
 
-fn app_handle(input: AcmeInput) -> Result<String, String> {
+fn app_handle(input: ExternalInput) -> Result<String, String> {
     Ok(format!("provider received: {}", input.name))
 }

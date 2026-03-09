@@ -48,6 +48,7 @@ generate_wit_nats_consumer_proxy_from_wit!(
 
 - `global_prefix`: Subject prefix for default subjects (default: `"default"`)
 - `wit_path`: Path to your WIT entry (default: `"wit/world.wit"`)
+- `generate_bindings`: Auto-emit `wit_bindgen::generate!` for `bindings_world` (default: `true`)
 - `routes`: Explicit route list
 - `route_overrides`: Override timeout/subject for existing routes (explicit or inferred)
 - `bindings_world`: Runtime bindings world (when omitted, `world` is used)
@@ -141,6 +142,8 @@ export!(Component with_types_in self);
 ## Notes
 
 - `wit_path` is resolved relative to `CARGO_MANIFEST_DIR`.
+- By default, no separate `wit_bindgen::generate!` call is required.
+- Set `generate_bindings: false` only if you already generate WIT bindings manually.
 - The macro uses `wit_parser` at compile time; errors are surfaced as Rust compile errors.
 - For defaults, subjects are built as: `rpc.<global_prefix>.<proxy_fn>`.
 

@@ -5,7 +5,9 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
-use syn::{braced, bracketed, parse_macro_input, Expr, Ident, LitStr, Path, Result, Token};
+use syn::{
+    braced, bracketed, parse_macro_input, Expr, Ident, LitBool, LitStr, Path, Result, Token,
+};
 use wit_parser::{Resolve, Type, TypeDefKind, WorldItem, WorldKey};
 
 struct RouteSpec {
@@ -97,6 +99,7 @@ struct ProxyConfig {
     bindings_world: Option<LitStr>,
     global_prefix: Option<LitStr>,
     wit_path: Option<LitStr>,
+    generate_bindings: Option<LitBool>,
     routes: Option<Vec<RouteSpec>>,
     route_overrides: Option<Vec<RouteOverrideSpec>>,
 }
@@ -113,6 +116,7 @@ impl Parse for ProxyConfig {
         let mut bindings_world: Option<LitStr> = None;
         let mut global_prefix: Option<LitStr> = None;
         let mut wit_path: Option<LitStr> = None;
+        let mut generate_bindings: Option<LitBool> = None;
         let mut routes: Option<Vec<RouteSpec>> = None;
         let mut route_overrides: Option<Vec<RouteOverrideSpec>> = None;
 
@@ -125,6 +129,7 @@ impl Parse for ProxyConfig {
                 "bindings_world" => bindings_world = Some(input.parse()?),
                 "global_prefix" => global_prefix = Some(input.parse()?),
                 "wit_path" => wit_path = Some(input.parse()?),
+                "generate_bindings" => generate_bindings = Some(input.parse()?),
                 "routes" => {
                     let content;
                     bracketed!(content in input);
@@ -162,6 +167,7 @@ impl Parse for ProxyConfig {
             bindings_world,
             global_prefix,
             wit_path,
+            generate_bindings,
             routes,
             route_overrides,
         })
@@ -204,6 +210,7 @@ fn expand(cfg: ProxyConfig, target: MacroTarget) -> Result<TokenStream2> {
         bindings_world,
         global_prefix,
         wit_path,
+        generate_bindings,
         routes,
         route_overrides,
     } = cfg;
@@ -212,9 +219,12 @@ fn expand(cfg: ProxyConfig, target: MacroTarget) -> Result<TokenStream2> {
 
     let global_prefix = global_prefix
         .unwrap_or_else(|| LitStr::new("default", Span::call_site()));
+    let generate_bindings = generate_bindings
+        .unwrap_or_else(|| LitBool::new(true, Span::call_site()));
 
     let wit_rel = wit_path
         .unwrap_or_else(|| LitStr::new("wit/world.wit", Span::call_site()));
+    let wit_bindgen_path = infer_wit_bindgen_path(&wit_rel)?;
 
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
         .map_err(|_| syn::Error::new(Span::call_site(), "CARGO_MANIFEST_DIR is not set"))?;
@@ -340,8 +350,26 @@ fn expand(cfg: ProxyConfig, target: MacroTarget) -> Result<TokenStream2> {
         });
     }
 
+    let bindings_tokens = if generate_bindings.value {
+        quote! {
+            wit_nats_proxy::wit_bindgen::generate!({
+                path: #wit_bindgen_path,
+                world: #bindings_world,
+                additional_derives: [
+                    wit_nats_proxy::serde::Serialize,
+                    wit_nats_proxy::serde::Deserialize
+                ],
+                generate_all,
+            });
+        }
+    } else {
+        quote! {}
+    };
+
     match target {
         MacroTarget::Consumer => Ok(quote! {
+            #bindings_tokens
+
             wit_nats_proxy::generate_wit_nats_consumer_proxy!(
                 world: #world,
                 bindings_world: #bindings_world,
@@ -352,6 +380,8 @@ fn expand(cfg: ProxyConfig, target: MacroTarget) -> Result<TokenStream2> {
             );
         }),
         MacroTarget::Provider => Ok(quote! {
+            #bindings_tokens
+
             wit_nats_proxy::generate_wit_nats_provider_proxy!(
                 world: #world,
                 global_prefix: #global_prefix,
@@ -361,6 +391,27 @@ fn expand(cfg: ProxyConfig, target: MacroTarget) -> Result<TokenStream2> {
             );
         }),
     }
+}
+
+fn infer_wit_bindgen_path(wit_path: &LitStr) -> Result<LitStr> {
+    let raw = wit_path.value();
+    let path = PathBuf::from(&raw);
+
+    let bindgen_path = if path.extension().is_some() {
+        path.parent().map(PathBuf::from).unwrap_or(path)
+    } else {
+        path
+    };
+
+    if bindgen_path.as_os_str().is_empty() {
+        return Err(syn::Error::new(
+            wit_path.span(),
+            "wit_path resolves to an empty path",
+        ));
+    }
+
+    let normalized = bindgen_path.to_string_lossy().replace('\\', "/");
+    Ok(LitStr::new(&normalized, wit_path.span()))
 }
 
 fn find_world_id(resolve: &Resolve, world_name: &str) -> Option<wit_parser::WorldId> {
@@ -385,8 +436,8 @@ fn resolve_world_function<'a>(
         .imports
         .iter()
         .chain(world.exports.iter())
-        .filter_map(|(key, item)| match (key, item) {
-            (WorldKey::Name(name), WorldItem::Interface { .. }) => Some(name.to_string()),
+        .filter_map(|(key, item)| match item {
+            WorldItem::Interface { id, .. } => Some(world_interface_key_name(resolve, key, *id)),
             _ => None,
         })
         .collect();
@@ -395,8 +446,11 @@ fn resolve_world_function<'a>(
         .imports
         .iter()
         .chain(world.exports.iter())
-        .find_map(|(key, item)| match (key, item) {
-            (WorldKey::Name(name), WorldItem::Interface { id, .. }) if name == interface_name => {
+        .find_map(|(key, item)| match item {
+            WorldItem::Interface { id, .. }
+                if normalize_interface_name(&world_interface_key_name(resolve, key, *id))
+                    == normalize_interface_name(interface_name) =>
+            {
                 Some(*id)
             }
             _ => None,
@@ -454,8 +508,28 @@ fn interface_is_exported_in_world(
     let world = &resolve.worlds[world_id];
     let needle = normalize_interface_name(interface_name);
     world.exports.iter().any(|(key, item)| {
-        matches!((key, item), (WorldKey::Name(name), WorldItem::Interface { .. }) if normalize_interface_name(name) == needle)
+        match item {
+            WorldItem::Interface { id, .. } => {
+                normalize_interface_name(&world_interface_key_name(resolve, key, *id)) == needle
+            }
+            _ => false,
+        }
     })
+}
+
+fn world_interface_key_name(
+    resolve: &Resolve,
+    key: &WorldKey,
+    item_interface_id: wit_parser::InterfaceId,
+) -> String {
+    match key {
+        WorldKey::Name(name) => name.to_string(),
+        WorldKey::Interface(id) => resolve.interfaces[*id]
+            .name
+            .clone()
+            .or_else(|| resolve.interfaces[item_interface_id].name.clone())
+            .unwrap_or_else(|| "interface".to_string()),
+    }
 }
 
 fn normalize_interface_name(name: &str) -> String {
